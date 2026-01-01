@@ -1,3 +1,5 @@
+//! Benchmarks for DogStatsD payload generation.
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use lading_payload::{Serialize, dogstatsd};
@@ -22,7 +24,7 @@ fn dogstatsd_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let dd =
+                let mut dd =
                     dogstatsd::DogStatsD::default(&mut rng).expect("failed to create DogStatsD");
                 let mut writer = Vec::with_capacity(size);
 

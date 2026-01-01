@@ -1,6 +1,8 @@
+//! Benchmarks for OpenTelemetry log payload generation.
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
-use lading_payload::{OpentelemetryLogs, Serialize};
+use lading_payload::{OpentelemetryLogs, Serialize, opentelemetry::log::Config};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
@@ -8,7 +10,8 @@ fn opentelemetry_log_setup(c: &mut Criterion) {
     c.bench_function("opentelemetry_log_setup", |b| {
         b.iter(|| {
             let mut rng = SmallRng::seed_from_u64(19690716);
-            let _ot = OpentelemetryLogs::new(&mut rng);
+            let _ot = OpentelemetryLogs::new(Config::default(), 1_000_000, &mut rng)
+                .expect("failed to create log generator");
         })
     });
 }
@@ -22,7 +25,8 @@ fn opentelemetry_log_all(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
                 let mut rng = SmallRng::seed_from_u64(19690716);
-                let ot = OpentelemetryLogs::new(&mut rng);
+                let mut ot = OpentelemetryLogs::new(Config::default(), size, &mut rng)
+                    .expect("failed to create log generator");
                 let mut writer = Vec::with_capacity(size);
 
                 ot.to_bytes(rng, size, &mut writer)
