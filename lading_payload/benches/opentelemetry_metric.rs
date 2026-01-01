@@ -1,6 +1,6 @@
 //! Benchmarks for OpenTelemetry metric payload generation.
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use lading_payload::common::config::ConfRange;
 use lading_payload::{
@@ -76,5 +76,3 @@ criterion_group!(
     config = Criterion::default().measurement_time(Duration::from_secs(90));
     targets = opentelemetry_metric_setup, opentelemetry_metric_all
 );
-
-criterion_main!(benches);
