@@ -359,3 +359,4 @@ When in doubt, implement rather than import.
 16. NEVER place `use` statements inside functions - all imports go at the top of the file
 17. NO internal backward compatibility - freely change ALL internal APIs. ONLY user configs need compatibility
 18. Document "why" not "what" - inline comments explain design decisions, not what the code does
+19. After completing each commit, push the branch to the local remote to preserve work. Use `git push upstream-local <branch>` after each commit to confirm it functions correctly
