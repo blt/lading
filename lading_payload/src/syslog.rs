@@ -48,14 +48,14 @@ impl Distribution<Message> for StandardUniform {
 }
 
 struct Member {
-    priority: u8,       // 0 - 191
-    syslog_version: u8, // 1 - 3
-    timestamp: String,  // seconds format in millis
-    hostname: String,   // name.tld
-    app_name: String,   // shortish string
-    procid: u16,        // 100 - 9999
-    msgid: u16,         // 1 - 999
-    message: String,    // shortish structured string
+    priority: u8,           // 0 - 191
+    syslog_version: u8,     // 1 - 3
+    timestamp: String,      // seconds format in millis
+    hostname: &'static str, // name.tld
+    app_name: &'static str, // shortish string
+    procid: u16,            // 100 - 9999
+    msgid: u16,             // 1 - 999
+    message: Message,       // structured data, serialized on write
 }
 
 impl Distribution<Member> for StandardUniform {
@@ -67,11 +67,11 @@ impl Distribution<Member> for StandardUniform {
             priority: rng.random_range(0..=191),
             syslog_version: rng.random_range(1..=3),
             timestamp: to_rfc3339(SystemTime::now()),
-            hostname: (*HOSTNAMES.choose(rng).expect("failed to choose hostnanme")).to_string(),
-            app_name: (*APP_NAMES.choose(rng).expect("failed to choose app name")).to_string(),
+            hostname: HOSTNAMES.choose(rng).expect("failed to choose hostname"),
+            app_name: APP_NAMES.choose(rng).expect("failed to choose app name"),
             procid: rng.random_range(100..=9999),
             msgid: rng.random_range(1..=999),
-            message: serde_json::to_string(&rng.random::<Message>()).expect("failed to serialize"),
+            message: rng.random(),
         }
     }
 }
@@ -84,18 +84,22 @@ where
 }
 
 impl Member {
-    fn into_string(self) -> String {
-        format!(
-            "<{}>{} {} {} {} {} ID{} - {}",
-            self.priority,
-            self.syslog_version,
-            self.timestamp,
-            self.hostname,
-            self.app_name,
-            self.procid,
-            self.msgid,
-            self.message
+    /// Write the member to a buffer.
+    fn write_to(&self, buffer: &mut Vec<u8>) -> Result<(), Error> {
+        write!(
+            buffer,
+            "<{priority}>{version} {timestamp} {hostname} {app_name} {procid} ID{msgid} - ",
+            priority = self.priority,
+            version = self.syslog_version,
+            timestamp = self.timestamp,
+            hostname = self.hostname,
+            app_name = self.app_name,
+            procid = self.procid,
+            msgid = self.msgid,
         )
+        .expect("formatting to Vec<u8> cannot fail");
+        serde_json::to_writer(&mut *buffer, &self.message)?;
+        Ok(())
     }
 }
 
@@ -110,18 +114,23 @@ impl crate::Serialize for Syslog5424 {
             return Ok(());
         }
 
-        let mut written_bytes = 0;
+        let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        // Each log line is formatted here, measured, then written to the output.
+        let mut buffer: Vec<u8> = Vec::with_capacity(512);
         for member in rng.sample_iter::<Member, StandardUniform>(StandardUniform) {
-            let encoded = member.into_string();
+            buffer.clear();
+            member.write_to(&mut buffer)?;
+            let line_length = buffer.len() + 1; // add one for the newline
 
-            if encoded.len() + 1 + written_bytes > max_bytes {
-                break;
+            match bytes_remaining.checked_sub(line_length) {
+                Some(remainder) => {
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
+                    bytes_remaining = remainder;
+                }
+                None => break,
             }
-
-            writeln!(writer, "{encoded}")?;
-
-            written_bytes += 1; // newline
-            written_bytes += encoded.len();
         }
 
         Ok(())
