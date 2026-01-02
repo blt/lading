@@ -46,7 +46,9 @@ impl crate::Serialize for Ascii {
             let line_length = encoding.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{encoding}")?;
+                    // Direct byte writes avoid writeln! formatting overhead
+                    writer.write_all(encoding.as_bytes())?;
+                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
