@@ -304,11 +304,108 @@ Do not run individual cargo commands - use the ci scripts instead:
 - Use `ci/kani <crate>` for kani proofs (valid crates: lading_throttle, lading_payload)
 - Use `ci/outdated` instead of `cargo outdated`
 
+# Benchmarking and Optimization Policy
+
+Lading is a performance tool. Performance claims require measured evidence. "Trust me,
+it's faster" is not acceptable. This section defines the requirements for optimization PRs.
+
+## The Rule: Measured Improvement Required
+
+**No optimization PR is accepted without measured improvement.** If an optimization cannot
+be quantified, it must either:
+1. Be rejected until appropriate measurement exists, or
+2. Be accompanied by a new metric that demonstrates the improvement
+
+## Benchmark Tiers
+
+Lading has two benchmark tiers that measure different things:
+
+### Tier 1: Micro-benchmarks (criterion)
+
+**Location**: `lading_payload/benches/*.rs`
+
+**What they measure**: Raw serialization throughput of individual payload generators.
+These benchmarks call `Serialize::to_bytes` directly with varying sizes and measure
+bytes/second.
+
+**Run with**: `cargo criterion`
+
+**Appropriate for optimizations to**:
+- `Serialize::to_bytes` implementations
+- Internal serialization logic within payload generators
+- String generation, encoding, data structure construction
+- Anything measured by calling the serializer directly
+
+**NOT appropriate for**:
+- Block cache construction optimizations
+- `minimum_block_size()` implementations
+- Initialization-time improvements
+- Full pipeline performance
+
+### Tier 2: Integration benchmarks (payloadtool + hyperfine)
+
+**Location**: `lading/src/bin/payloadtool.rs`
+
+**What they measure**: Full block cache construction time, including all initialization,
+the block construction loop, and `minimum_block_size()` optimizations. This measures
+what users actually experience during lading startup.
+
+**Run with**: `hyperfine --warmup 3 'cargo run --release --bin payloadtool -- <config>'`
+
+**Appropriate for optimizations to**:
+- `block::Cache` construction
+- `minimum_block_size()` implementations (reduces wasted `to_bytes` calls)
+- Initialization-time pre-computation
+- Anything that affects time-to-first-block
+
+## Optimization Type to Benchmark Mapping
+
+| Optimization Type | Required Benchmark | Rationale |
+|---|---|---|
+| Serialization hot path | Tier 1 (criterion) | Measures raw throughput |
+| `to_bytes` algorithm change | Tier 1 (criterion) | Measures raw throughput |
+| `minimum_block_size()` | Tier 2 (payloadtool) | Affects cache build, not serialization |
+| Block cache construction | Tier 2 (payloadtool) | Full pipeline timing |
+| Initialization changes | Tier 2 (payloadtool) | Startup time |
+| Mixed (serialization + init) | Both tiers | Must show improvement in both |
+
+## Unmeasured Optimizations
+
+If an optimization affects a code path that neither benchmark tier measures:
+
+1. **Reject the optimization** until measurement exists
+2. OR **add a new benchmark** that measures the affected code path
+3. AND **document the new benchmark** in this section
+
+Do not merge "obviously correct" optimizations without measurement. Lading's correctness
+depends on empirical validation, not intuition.
+
+## Case Study: minimum_block_size()
+
+The `minimum_block_size()` trait method allows serializers to report their minimum viable
+block size, reducing wasted `to_bytes` calls during block cache construction.
+
+**Micro-benchmarks show no change**: Correct. Micro-benchmarks call `to_bytes` directly
+with known-good sizes. They never trigger the empty-block retry loop.
+
+**Required evidence**: Tier 2 benchmarks (payloadtool + hyperfine) showing reduced
+cache construction time due to fewer rejected blocks.
+
+**Status**: Until payloadtool benchmarks demonstrate measurable improvement,
+`minimum_block_size()` implementations are speculative. They may be merged if:
+1. The implementation is trivially correct (returns a constant), AND
+2. The implementation cost is zero (no runtime overhead), AND
+3. A tracking issue exists to add Tier 2 benchmark validation
+
+Implementations with runtime cost or complexity require measured improvement.
+
 # Tools
 
 To identify outdated dependencies: Use `ci/outdated`
 
 To run micro-benchmarks: `cargo criterion`
+
+To run integration benchmarks: `hyperfine --warmup 3 'cargo run --release --bin payloadtool -- <config>'`
 
 ## Dependencies
 
