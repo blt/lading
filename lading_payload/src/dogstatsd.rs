@@ -599,16 +599,20 @@ impl DogStatsD {
         }
 
         let mut bytes_remaining = max_bytes.saturating_sub(LENGTH_PREFIX_SIZE);
-        let mut members = Vec::new();
+        // Pre-serialize members into a buffer to avoid repeated format!() allocations.
+        // Store serialized bytes directly instead of String to avoid UTF-8 re-encoding.
+        let mut members: Vec<Vec<u8>> = Vec::new();
+        let mut buffer: Vec<u8> = Vec::with_capacity(4096);
         // Generate as many messages as we can fit, If we couldn't fit any
         // members, don't write anything.
         loop {
             let member: Member = self.member_generator.generate(&mut rng)?;
-            let encoding = format!("{member}");
-            let line_length = encoding.len() + 1; // add one for the newline
+            buffer.clear();
+            write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    members.push(encoding);
+                    members.push(buffer.clone());
                     bytes_remaining = remainder;
                 }
                 None => break,
@@ -634,14 +638,12 @@ impl DogStatsD {
 
         // write prefix
         writer.write_all(&length.to_le_bytes())?;
-        debug!(
-            "Filling block. Requested: {max_bytes} bytes. Actual: {} bytes.",
-            length
-        );
+        debug!("Filling block. Requested: {max_bytes} bytes. Actual: {length} bytes.",);
 
         // write contents
         for member in members {
-            writeln!(writer, "{member}")?;
+            writer.write_all(&member)?;
+            writer.write_all(b"\n")?;
         }
 
         Ok(())
@@ -658,13 +660,17 @@ impl DogStatsD {
         W: Write,
     {
         let mut bytes_remaining = max_bytes;
+        // Reuse a single buffer across iterations to avoid repeated allocations.
+        let mut buffer: Vec<u8> = Vec::with_capacity(4096);
         loop {
             let member: Member = self.member_generator.generate(&mut rng)?;
-            let encoding = format!("{member}");
-            let line_length = encoding.len() + 1; // add one for the newline
+            buffer.clear();
+            write!(&mut buffer, "{member}").expect("formatting to Vec<u8> cannot fail");
+            let line_length = buffer.len() + 1; // add one for the newline
             match bytes_remaining.checked_sub(line_length) {
                 Some(remainder) => {
-                    writeln!(writer, "{encoding}")?;
+                    writer.write_all(&buffer)?;
+                    writer.write_all(b"\n")?;
                     bytes_remaining = remainder;
                 }
                 None => break,
@@ -675,10 +681,7 @@ impl DogStatsD {
         }
 
         let length = max_bytes - bytes_remaining;
-        debug!(
-            "Filling block. Requested: {max_bytes} bytes. Actual: {} bytes.",
-            length
-        );
+        debug!("Filling block. Requested: {max_bytes} bytes. Actual: {length} bytes.",);
         Ok(())
     }
 }
