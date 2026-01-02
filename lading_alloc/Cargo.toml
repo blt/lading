@@ -1,0 +1,30 @@
+[package]
+name = "lading-alloc"
+version = "0.1.0"
+authors = [
+  "Brian L. Troutwine <brian.troutwine@datadoghq.com>",
+  "George Hahn <george.hahn@datadoghq.com>",
+]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/datadog/lading/"
+keywords = ["allocator", "profiling", "debugging"]
+categories = ["development-tools::profiling"]
+description = "Allocation detection system for lading hot paths."
+readme = "../README.md"
+
+[dependencies]
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[features]
+default = []
+# Enable allocation tracking even in release builds
+alloc-guard = []
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

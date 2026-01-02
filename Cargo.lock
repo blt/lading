@@ -1873,6 +1873,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "kube-core",
+ "lading-alloc",
  "lading-capture",
  "lading-capture-schema",
  "lading-payload",
@@ -1913,6 +1914,13 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zstd",
+]
+
+[[package]]
+name = "lading-alloc"
+version = "0.1.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]
@@ -1969,6 +1977,7 @@ dependencies = [
  "byte-unit",
  "bytes",
  "criterion",
+ "lading-alloc",
  "opentelemetry-proto",
  "proptest",
  "proptest-derive",
@@ -1999,6 +2008,7 @@ name = "lading-throttle"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "lading-alloc",
  "proptest",
  "serde",
  "thiserror 2.0.17",

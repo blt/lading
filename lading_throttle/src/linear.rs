@@ -4,6 +4,8 @@
 
 use std::num::NonZeroU32;
 
+use lading_alloc::NoAllocGuard;
+
 use crate::INTERVAL_TICKS;
 
 use super::{Clock, RealClock};
@@ -121,6 +123,10 @@ impl Valve {
     /// Note that `ticks_elapsed` must be an absolute value.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn request(&mut self, ticks_elapsed: u64, capacity_request: u32) -> Result<u64, Error> {
+        // This is a hot path - no allocations allowed. The guard tracks any
+        // allocations as violations in debug builds.
+        let _guard = NoAllocGuard::new();
+
         // Okay, here's the idea. We have bucket that fills every INTERVAL_TICKS
         // microseconds and requests draw down on that bucket. When it's empty,
         // we return the number of ticks until the next interval roll-over.
@@ -386,5 +392,74 @@ mod verification {
             slop == INTERVAL_TICKS - ticks_in_interval,
             "Wait time should be exactly the time remaining until interval boundary",
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Verify that Valve::request does not allocate in debug builds.
+        ///
+        /// The throttle is a critical hot path - incorrect allocation behavior
+        /// would invalidate performance claims made using lading.
+        #[test]
+        fn valve_request_does_not_allocate(
+            initial_capacity in 0u32..=100_000u32,
+            maximum_capacity in 1u32..=1_000_000u32,
+            rate_of_change in 0u32..=10_000u32,
+            ticks_elapsed in 0u64..=100_000_000u64,
+            capacity_request in 0u32..=1_000_000u32,
+        ) {
+            // Ensure initial_capacity <= maximum_capacity
+            let initial = initial_capacity.min(maximum_capacity);
+            let max_cap = NonZeroU32::new(maximum_capacity).expect("test max_cap");
+            let mut valve = Valve::new(initial, max_cap, rate_of_change);
+
+            // Cap capacity_request to maximum_capacity to avoid the error path
+            let capped_request = capacity_request.min(maximum_capacity);
+
+            // Check that no allocations occur during request
+            let violations = lading_alloc::check_no_alloc(|| {
+                let _ = valve.request(ticks_elapsed, capped_request);
+            });
+
+            prop_assert_eq!(
+                violations,
+                0,
+                "Valve::request allocated {} times, but hot paths must not allocate",
+                violations
+            );
+        }
+
+        /// Verify that multiple sequential requests do not allocate.
+        #[test]
+        fn valve_sequential_requests_do_not_allocate(
+            initial_capacity in 0u32..=10_000u32,
+            maximum_capacity in 1u32..=100_000u32,
+            rate_of_change in 0u32..=1_000u32,
+            num_requests in 1usize..=20usize,
+        ) {
+            let initial = initial_capacity.min(maximum_capacity);
+            let max_cap = NonZeroU32::new(maximum_capacity).expect("test max_cap");
+            let mut valve = Valve::new(initial, max_cap, rate_of_change);
+
+            let violations = lading_alloc::check_no_alloc(|| {
+                for i in 0..num_requests {
+                    let ticks = (i as u64) * 1000;
+                    let request = (i as u32) % maximum_capacity;
+                    let _ = valve.request(ticks, request);
+                }
+            });
+
+            prop_assert_eq!(
+                violations,
+                0,
+                "Sequential Valve::request calls allocated {} times",
+                violations
+            );
+        }
     }
 }

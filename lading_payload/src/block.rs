@@ -9,6 +9,7 @@ use std::num::NonZeroU32;
 
 use byte_unit::{Byte, Unit};
 use bytes::{BufMut, Bytes, BytesMut, buf::Writer};
+use lading_alloc::NoAllocGuard;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
@@ -421,6 +422,9 @@ impl Cache {
     /// Get the total bytes of the next block without advancing.
     #[must_use]
     pub fn peek_next_size(&self, handle: &Handle) -> NonZeroU32 {
+        // This is a hot path - no allocations allowed.
+        let _guard = NoAllocGuard::new();
+
         match self {
             Self::Fixed { blocks, .. } => blocks[handle.idx].total_bytes,
         }
@@ -439,6 +443,9 @@ impl Cache {
     /// This advances the handle to the next block in the cache and returns a
     /// reference to the block corresponding to `Handle` internal position.
     pub fn advance<'a>(&'a self, handle: &mut Handle) -> &'a Block {
+        // This is a hot path - no allocations allowed.
+        let _guard = NoAllocGuard::new();
+
         match self {
             Self::Fixed { blocks, .. } => {
                 let block = &blocks[handle.idx];
@@ -701,5 +708,134 @@ where
             bytes,
             metadata,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Create a minimal test cache with the given number of blocks.
+    fn create_test_cache(num_blocks: usize) -> Cache {
+        let blocks: Vec<Block> = (1..=num_blocks)
+            .map(|i| {
+                let size = (i * 100) as u32;
+                Block {
+                    total_bytes: NonZeroU32::new(size).expect("test size"),
+                    bytes: Bytes::from(vec![0u8; size as usize]),
+                    metadata: BlockMetadata::default(),
+                }
+            })
+            .collect();
+
+        let total_cycle_size = blocks.iter().map(|b| u64::from(b.total_bytes.get())).sum();
+
+        Cache::Fixed {
+            idx: 0,
+            blocks,
+            total_cycle_size,
+        }
+    }
+
+    proptest! {
+        /// Verify that Cache::peek_next_size does not allocate.
+        ///
+        /// This is a hot path called frequently during load generation.
+        #[test]
+        fn peek_next_size_does_not_allocate(
+            num_blocks in 1usize..=100usize,
+            handle_idx in 0usize..100usize,
+        ) {
+            let cache = create_test_cache(num_blocks);
+            let mut handle = cache.handle();
+            // Set the handle index, wrapping to valid range
+            handle.idx = handle_idx % num_blocks;
+
+            let violations = lading_alloc::check_no_alloc(|| {
+                let _ = cache.peek_next_size(&handle);
+            });
+
+            prop_assert_eq!(
+                violations,
+                0,
+                "Cache::peek_next_size allocated {} times, but hot paths must not allocate",
+                violations
+            );
+        }
+
+        /// Verify that Cache::advance does not allocate.
+        ///
+        /// This is the primary hot path for retrieving blocks during generation.
+        #[test]
+        fn advance_does_not_allocate(
+            num_blocks in 1usize..=100usize,
+            handle_idx in 0usize..100usize,
+        ) {
+            let cache = create_test_cache(num_blocks);
+            let mut handle = cache.handle();
+            handle.idx = handle_idx % num_blocks;
+
+            let violations = lading_alloc::check_no_alloc(|| {
+                let _ = cache.advance(&mut handle);
+            });
+
+            prop_assert_eq!(
+                violations,
+                0,
+                "Cache::advance allocated {} times, but hot paths must not allocate",
+                violations
+            );
+        }
+
+        /// Verify that multiple sequential advance calls do not allocate.
+        #[test]
+        fn sequential_advances_do_not_allocate(
+            num_blocks in 1usize..=50usize,
+            num_advances in 1usize..=100usize,
+        ) {
+            let cache = create_test_cache(num_blocks);
+            let mut handle = cache.handle();
+
+            let violations = lading_alloc::check_no_alloc(|| {
+                for _ in 0..num_advances {
+                    let _ = cache.advance(&mut handle);
+                }
+            });
+
+            prop_assert_eq!(
+                violations,
+                0,
+                "Sequential Cache::advance calls allocated {} times",
+                violations
+            );
+        }
+
+        /// Verify that mixed peek and advance operations do not allocate.
+        #[test]
+        fn mixed_operations_do_not_allocate(
+            num_blocks in 1usize..=50usize,
+            num_operations in 1usize..=50usize,
+        ) {
+            let cache = create_test_cache(num_blocks);
+            let mut handle = cache.handle();
+
+            let violations = lading_alloc::check_no_alloc(|| {
+                for i in 0..num_operations {
+                    if i % 2 == 0 {
+                        let _ = cache.peek_next_size(&handle);
+                    } else {
+                        let _ = cache.advance(&mut handle);
+                    }
+                }
+            });
+
+            prop_assert_eq!(
+                violations,
+                0,
+                "Mixed Cache operations allocated {} times",
+                violations
+            );
+        }
     }
 }

@@ -1,5 +1,11 @@
 //! Main lading binary for load testing.
 
+// Install the guarded allocator to detect allocations in hot paths.
+// This is only active in debug builds or when the alloc-guard feature is enabled.
+#[cfg(any(debug_assertions, feature = "alloc-guard"))]
+#[global_allocator]
+static GLOBAL: lading_alloc::GuardedAllocator = lading_alloc::GuardedAllocator;
+
 use std::{
     env,
     fmt::{self, Display},
