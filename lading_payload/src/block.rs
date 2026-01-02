@@ -541,7 +541,11 @@ where
     S: crate::Serialize,
     R: Rng + ?Sized,
 {
-    let mut min_block_size = 0;
+    // Use the serializer's reported minimum block size if available. This
+    // avoids wasted to_bytes calls that would produce empty blocks.
+    let serializer_min = serializer.minimum_block_size();
+    #[allow(clippy::cast_possible_truncation)]
+    let mut min_block_size = serializer_min as u32;
     let mut min_actual_block_size = u32::MAX;
     let mut max_actual_block_size = 0;
     let mut rejected_block_sizes = 0;
@@ -550,6 +554,7 @@ where
     info!(
         ?max_block_size,
         ?total_bytes,
+        ?serializer_min,
         "Constructing requested block cache"
     );
     let mut block_cache: Vec<Block> = Vec::with_capacity(128);

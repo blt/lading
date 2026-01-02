@@ -95,6 +95,18 @@ pub trait Serialize {
         R: Rng + Sized,
         W: Write;
 
+    /// Reports the minimum viable block size for this serializer.
+    ///
+    /// The block cache uses this to avoid wasted `to_bytes` calls with sizes
+    /// that are too small to produce any output. Implementations should return
+    /// the smallest `max_bytes` value that can produce non-empty output.
+    ///
+    /// Returns 0 if the minimum size is unknown or if the serializer can
+    /// produce output for any non-zero size.
+    fn minimum_block_size(&self) -> usize {
+        0
+    }
+
     /// Reports data points count for the most recently generated content.
     ///
     /// IMPORTANT: This method should be called immediately after `to_bytes` to

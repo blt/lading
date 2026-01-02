@@ -54,6 +54,11 @@ impl crate::Serialize for Ascii {
         }
         Ok(())
     }
+
+    fn minimum_block_size(&self) -> usize {
+        // Minimum line: 1 character + newline = 2 bytes
+        2
+    }
 }
 
 #[cfg(test)]
