@@ -28,13 +28,19 @@ impl Distribution<Member> for StandardUniform {
     where
         R: Rng + ?Sized,
     {
-        let max = SIZES.choose(rng).expect("failed to choose size");
+        let max = *SIZES.choose(rng).expect("failed to choose size");
+
+        // Pre-allocate and fill in one operation rather than iterator-collect.
+        // Using fill() is faster than sample_iter().take().collect() because
+        // it generates random bytes in bulk without iterator overhead.
+        let mut byte_parade = vec![0u8; max];
+        rng.fill(&mut byte_parade[..]);
 
         Member {
             id: rng.random(),
             name: rng.random(),
             seed: rng.random(),
-            byte_parade: rng.sample_iter(StandardUniform).take(*max).collect(),
+            byte_parade,
         }
     }
 }
